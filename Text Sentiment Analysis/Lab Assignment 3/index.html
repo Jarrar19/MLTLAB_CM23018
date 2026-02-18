@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>LabAssignment3 - RNN vs Dense</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<style>
+body { font-family: Arial; padding: 30px; }
+.card { border:1px solid #ccc; padding:20px; margin:10px; display:inline-block; width:300px; }
+h2 { margin-bottom:0 }
+.metric { font-size:24px; font-weight:bold; margin-top:10px }
+</style>
+</head>
+<body>
+
+<h1>LabAssignment3: RNN vs Dense Sentiment Comparison</h1>
+
+<button onclick="startComparison()">Train & Compare</button>
+
+<div>
+  <div class="card">
+    <h2>Dense Network</h2>
+    <div id="denseAcc" class="metric">--%</div>
+    <p>Flatten → Dense(32) → Sigmoid</p>
+  </div>
+
+  <div class="card">
+    <h2>RNN Network</h2>
+    <div id="rnnAcc" class="metric">--%</div>
+    <p>Embedding → SimpleRNN → Sigmoid</p>
+  </div>
+</div>
+
+<script>
+
+let texts = [];
+let labels = [];
+let wordIndex = {};
+let vocabSize;
+
+const MAX_LEN = 100;
+const MAX_SAMPLES = 500;
+
+async function startComparison() {
+
+    texts = [];
+    labels = [];
+    wordIndex = {};
+
+    console.log("Loading IMDB CSV...");
+
+    Papa.parse("../Lab Assignment 1/IMDB Dataset.csv", {
+        download:true,
+        header:true,
+        complete: async function(results) {
+
+            results.data.slice(0, MAX_SAMPLES).forEach(row => {
+                texts.push(row.review.toLowerCase());
+                labels.push(row.sentiment === "positive" ? 1 : 0);
+            });
+
+            buildVocab();
+            await trainDense();
+            await trainRNN();
+        }
+    });
+}
+
+function buildVocab() {
+    let index = 1;
+    texts.forEach(t=>{
+        t.split(/\W+/).forEach(w=>{
+            if(w && !wordIndex[w]) wordIndex[w]=index++;
+        });
+    });
+    vocabSize = index;
+}
+
+function encode(texts) {
+    return texts.map(t=>{
+        let seq = t.split(/\W+/).map(w=>wordIndex[w]||0);
+        if(seq.length>MAX_LEN) seq=seq.slice(0,MAX_LEN);
+        while(seq.length<MAX_LEN) seq.push(0);
+        return seq;
+    });
+}
+
+function splitData(xs, ys) {
+    const split = Math.floor(xs.length*0.8);
+    return {
+        trainX: xs.slice(0,split),
+        trainY: ys.slice(0,split),
+        testX: xs.slice(split),
+        testY: ys.slice(split)
+    };
+}
+
+async function trainDense() {
+
+    console.log("Training Dense...");
+
+    const encoded = encode(texts);
+    const {trainX,trainY,testX,testY} = splitData(encoded, labels);
+
+    const xsTrain = tf.tensor2d(trainX);
+    const ysTrain = tf.tensor2d(trainY,[trainY.length,1]);
+    const xsTest = tf.tensor2d(testX);
+    const ysTest = tf.tensor2d(testY,[testY.length,1]);
+
+    const model = tf.sequential();
+    model.add(tf.layers.embedding({inputDim:vocabSize, outputDim:16, inputLength:MAX_LEN}));
+    model.add(tf.layers.flatten());
+    model.add(tf.layers.dense({units:32, activation:'relu'}));
+    model.add(tf.layers.dense({units:1, activation:'sigmoid'}));
+
+    model.compile({optimizer:'adam', loss:'binaryCrossentropy', metrics:['accuracy']});
+
+    await model.fit(xsTrain, ysTrain, {epochs:5, batchSize:16});
+
+    const eval = model.evaluate(xsTest, ysTest);
+    const acc = (await eval[1].data())[0];
+
+    document.getElementById("denseAcc").innerText = (acc*100).toFixed(2)+"%";
+}
+
+async function trainRNN() {
+
+    console.log("Training RNN...");
+
+    const encoded = encode(texts);
+    const {trainX,trainY,testX,testY} = splitData(encoded, labels);
+
+    const xsTrain = tf.tensor2d(trainX);
+    const ysTrain = tf.tensor2d(trainY,[trainY.length,1]);
+    const xsTest = tf.tensor2d(testX);
+    const ysTest = tf.tensor2d(testY,[testY.length,1]);
+
+    const model = tf.sequential();
+    model.add(tf.layers.embedding({inputDim:vocabSize, outputDim:16, inputLength:MAX_LEN}));
+    model.add(tf.layers.simpleRNN({units:32}));
+    model.add(tf.layers.dense({units:1, activation:'sigmoid'}));
+
+    model.compile({optimizer:'adam', loss:'binaryCrossentropy', metrics:['accuracy']});
+
+    await model.fit(xsTrain, ysTrain, {epochs:5, batchSize:16});
+
+    const eval = model.evaluate(xsTest, ysTest);
+    const acc = (await eval[1].data())[0];
+
+    document.getElementById("rnnAcc").innerText = (acc*100).toFixed(2)+"%";
+}
+
+</script>
+
+</body>
+</html>
