@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>LabAssignment2 - Sentiment Prediction</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+</head>
+<body>
+
+<h2>LabAssignment2: Test Custom Sentences (IMDB RNN)</h2>
+
+<button onclick="loadAndTrain()">Train Model</button>
+<br><br>
+
+<input type="text" id="inputText" size="60" placeholder="Enter a sentence">
+<button onclick="predict()">Predict Sentiment</button>
+
+<h3 id="result"></h3>
+
+<script>
+
+let texts = [];
+let labels = [];
+let wordIndex = {};
+let vocabSize;
+let model;
+
+const MAX_LEN = 100;
+const MAX_SAMPLES = 300;
+
+async function loadAndTrain() {
+
+    texts = [];
+    labels = [];
+    wordIndex = {};
+
+    console.log("Loading IMDB CSV...");
+
+    Papa.parse("../Lab Assignment 1/IMDB Dataset.csv", {
+        download: true,
+        header: true,
+        complete: async function(results) {
+
+            results.data.slice(0, MAX_SAMPLES).forEach(row => {
+                texts.push(row.review.toLowerCase());
+                labels.push(row.sentiment === "positive" ? 1 : 0);
+            });
+
+            console.log("Samples:", texts.length);
+            await trainModel();
+        }
+    });
+}
+
+function buildVocab() {
+    let index = 1;
+    texts.forEach(text => {
+        text.split(/\W+/).forEach(word => {
+            if(word && !wordIndex[word]) {
+                wordIndex[word] = index++;
+            }
+        });
+    });
+    vocabSize = index;
+}
+
+function encode(texts) {
+    return texts.map(text => {
+        const seq = text.split(/\W+/).map(w => wordIndex[w] || 0);
+        if(seq.length > MAX_LEN) return seq.slice(0,MAX_LEN);
+        while(seq.length < MAX_LEN) seq.push(0);
+        return seq;
+    });
+}
+
+async function trainModel() {
+
+    console.log("Building vocab...");
+    buildVocab();
+
+    const xs = tf.tensor2d(encode(texts));
+    const ys = tf.tensor2d(labels, [labels.length,1]);
+
+    console.log("Training RNN...");
+
+    model = tf.sequential();
+    model.add(tf.layers.embedding({
+        inputDim: vocabSize,
+        outputDim: 16,
+        inputLength: MAX_LEN
+    }));
+    model.add(tf.layers.simpleRNN({units:32}));
+    model.add(tf.layers.dense({units:1, activation:'sigmoid'}));
+
+    model.compile({
+        optimizer:'adam',
+        loss:'binaryCrossentropy',
+        metrics:['accuracy']
+    });
+
+    await model.fit(xs, ys, {
+        epochs:5,
+        batchSize:16
+    });
+
+    console.log("Model ready.");
+}
+
+function preprocessSentence(text) {
+
+    text = text.toLowerCase();
+    let seq = text.split(/\W+/).map(w => wordIndex[w] || 0);
+
+    if(seq.length > MAX_LEN) seq = seq.slice(0,MAX_LEN);
+    while(seq.length < MAX_LEN) seq.push(0);
+
+    return tf.tensor2d([seq]);
+}
+
+function predict() {
+
+    if(!model) {
+        alert("Train model first");
+        return;
+    }
+
+    const text = document.getElementById("inputText").value;
+    const tensor = preprocessSentence(text);
+
+    const prediction = model.predict(tensor).dataSync()[0];
+
+    const sentiment = prediction > 0.5 ? "Positive" : "Negative";
+    const confidence = (prediction*100).toFixed(2);
+
+    document.getElementById("result").innerHTML =
+        `Sentiment: <b>${sentiment}</b><br>Confidence: ${confidence}%`;
+}
+
+</script>
+
+</body>
+</html>
