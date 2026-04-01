@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>AI Classroom Assistant (Pro Version)</title>
+
+  <!-- TensorFlow.js -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+
+  <!-- COCO-SSD -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+
+  <!-- FaceMesh -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection"></script>
+
+  <style>
+    body {
+      text-align: center;
+      font-family: Arial;
+      background: #f4f4f4;
+    }
+    video {
+      border: 2px solid black;
+      border-radius: 10px;
+    }
+    #output {
+      margin-top: 20px;
+      font-size: 18px;
+      background: white;
+      padding: 15px;
+      border-radius: 10px;
+      display: inline-block;
+    }
+    button {
+      margin-top: 10px;
+      padding: 8px 15px;
+      font-size: 16px;
+      border-radius: 8px;
+      border: none;
+      background: #007bff;
+      color: white;
+      cursor: pointer;
+    }
+  </style>
+</head>
+
+<body>
+
+<h1>🎓 AI Classroom Assistant (Pro)</h1>
+
+<video id="webcam" autoplay playsinline width="400" height="300"></video>
+
+<div id="output">
+  <p><b>Person:</b> <span id="object">Loading...</span></p>
+  <p><b>Attention:</b> <span id="pose">Calibrating...</span></p>
+  <p><b>Attention Score:</b> <span id="score">0%</span></p>
+</div>
+
+<button onclick="recalibrate()">🔄 Recalibrate</button>
+
+<script>
+  const video = document.getElementById("webcam");
+
+  let baselineY = null;
+  let attentiveCount = 0;
+  let totalCount = 0;
+
+  function recalibrate() {
+    baselineY = null;
+    attentiveCount = 0;
+    totalCount = 0;
+    document.getElementById("pose").innerText = "📌 Recalibrating...";
+  }
+
+  async function setupCamera() {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    video.srcObject = stream;
+
+    return new Promise(resolve => {
+      video.onloadedmetadata = () => resolve(video);
+    });
+  }
+
+  async function runAI() {
+    await setupCamera();
+
+    const objectModel = await cocoSsd.load();
+
+    const faceModel = await faceLandmarksDetection.createDetector(
+      faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
+      { runtime: "tfjs" }
+    );
+
+    setInterval(async () => {
+
+      // -------- PERSON DETECTION --------
+      const predictions = await objectModel.detect(video);
+      const person = predictions.some(p => p.class === "person");
+
+      document.getElementById("object").innerText =
+        person ? "✅ Present" : "❌ Absent";
+
+      // -------- FACE DETECTION --------
+      const faces = await faceModel.estimateFaces(video);
+
+      if (faces.length > 0) {
+
+        const keypoints = faces[0].keypoints;
+
+        let leftEye = keypoints[33];
+        let rightEye = keypoints[263];
+        let nose = keypoints[1];
+
+        let eyeCenterX = (leftEye.x + rightEye.x) / 2;
+        function playBeep() {
+        const audio = new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg");
+          audio.play();
+}
+        // CALIBRATION
+        if (baselineY === null) {
+          baselineY = nose.y;
+          document.getElementById("pose").innerText = "📌 Calibrating... Look straight";
+          return;
+        }
+
+        let diffY = nose.y - baselineY;
+        let status = "";
+
+        // LEFT / RIGHT
+        if (nose.x < eyeCenterX - 20) {
+          status = "❌ Looking Left";
+        }
+        else if (nose.x > eyeCenterX + 20) {
+          status = "❌ Looking Right";
+        }
+
+        // UP
+        else if (diffY < -15) {
+          status = "⚠ Looking Up";
+        }
+
+        // DOWN
+        else if (diffY > 20) {
+          status = "❌ Looking Down";
+          playBeep();
+        alert("⚠ Please Pay Attention!");
+        }
+
+        // ATTENTIVE
+        else {
+          status = "✅ Attentive";
+          attentiveCount++;
+        }
+
+        totalCount++;
+
+        document.getElementById("pose").innerText = status;
+
+        // ATTENTION SCORE
+        let score = ((attentiveCount / totalCount) * 100).toFixed(1);
+        document.getElementById("score").innerText = score + "%";
+
+      } else {
+        document.getElementById("pose").innerText = "⚠ Face Not Detected";
+      }
+
+    }, 800);
+  }
+
+  runAI();
+</script>
+
+</body>
+</html>
